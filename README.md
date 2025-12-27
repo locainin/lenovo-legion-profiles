@@ -127,6 +127,7 @@ sudo systemctl disable --now auto-cpufreq.service   # if present
 sudo systemctl disable --now tlp.service            # if present
 sudo systemctl disable --now dynamic_power.service  # if present
 ```
+- Note: dynamic-power-daemon can remain enabled if `acpi_platform_profile` is set to `disabled` in each profile in the system config `dynamic_power.yaml`. This prevents writes to `platform_profile` while still allowing CPU/EPP/ASPM tuning.
   ## How to verify it’s working
 
 - **Watch the current profile:**
