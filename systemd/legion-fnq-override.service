@@ -1,0 +1,10 @@
+[Unit]
+Description=Override Legion Fn+Q to 4-step platform_profile cycle
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/legion-fnq-override.sh
+
+[Install]
+WantedBy=multi-user.target

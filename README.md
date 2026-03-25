@@ -1,143 +1,209 @@
 # lenovo-legion-profiles
 
-
 ## What this does
 
-Most Lenovo Legion laptops on Linux expose these profiles:
+Lenovo Legion laptops expose their thermal mode through `/sys/firmware/acpi/platform_profile`.
+Fn+Q usually cycles the firmware profiles, but Lenovo changed the Linux-facing names for the red
+and purple slots in newer kernels.
 
-- `low-power`              → blue LED
-- `balanced`               → white LED
-- `balanced-performance`   → red LED (firmware “Performance”)
-- `performance`            → pink LED (hidden / “Extreme” slot)
-- `custom`                 → reserved
+This script watches `platform_profile`, treats each firmware change as an Fn+Q press, and applies
+its own 4-step cycle so the hidden purple slot stays reachable from the keyboard.
 
-Fn+Q in firmware only cycles **three** of them:
+The script now auto-detects which kernel ABI is present:
 
-`low-power → balanced → balanced-performance → low-power → …`
+- Legacy mapping:
+  `low-power → balanced → balanced-performance → performance`
+- Current mapping:
+  `low-power → balanced → performance → max-power`
 
-This script:
+`custom` is left alone and is not part of the Fn+Q override cycle.
 
-- Watches `/sys/firmware/acpi/platform_profile` for changes caused by Fn+Q.
-- Treats each change as a “Fn+Q pressed” event.
-- Immediately overrides the profile using its own **4-step state order that includes performance**:
+## Profile mapping
 
-`low-power → balanced → balanced-performance → performance → low-power → …`
+Current Lenovo Gamezone docs describe the modern profile names like this:
 
-So Fn+Q effectively becomes:
+- `low-power` → blue LED
+- `balanced` → white LED
+- `performance` → red LED
+- `max-power` → purple LED
+- `custom` → purple LED
 
-> blue → white → red → pink → blue …
+Older kernels exposed the same red and purple slots like this:
 
+- `balanced-performance` → red LED
+- `performance` → purple LED
+
+The script maps both layouts to the same logical order:
+
+`blue → white → red → purple → blue`
+
+## Compatibility note
+
+Lenovo's Gamezone driver used to expose the red and purple firmware slots with confusing Linux
+names on some Legion models:
+
+- BIOS `Performance` showed up as `balanced-performance`
+- BIOS `Extreme` showed up as `performance`
+
+That meant the LED colors and Linux profile names did not line up cleanly.
+
+Newer kernels switched the Gamezone driver to expose the purple `Extreme` slot as `max-power`
+instead of overloading `performance`. Current kernel documentation now describes the mapping as:
+
+- `low-power` → blue LED
+- `balanced` → white LED
+- `performance` → red LED
+- `max-power` → purple LED
+- `custom` → purple LED
+
+This project handles both layouts, so the same Fn+Q override logic works on older and newer
+kernels.
 
 ## Requirements
 
-### Hardware / kernel
+### Hardware and kernel
 
-- A Lenovo Legion laptop with firmware that exposes `platform_profile`. (should already be default in most main kernals)
-- A Linux kernel with `CONFIG_ACPI_PLATFORM_PROFILE` enabled (true on mainline Arch, Fedora, Ubuntu, etc.)
-- You can check support with:
+- A Lenovo Legion laptop that exposes `platform_profile`
+- A kernel with `CONFIG_ACPI_PLATFORM_PROFILE`
+- A kernel that also exposes `platform_profile_choices`
 
-```
+Check support with:
+
+```bash
 ls /sys/firmware/acpi/platform_profile
 cat /sys/firmware/acpi/platform_profile_choices
 ```
 
-any custom “dynamic power” unit that writes to /sys/firmware/acpi/platform_profile
-
-If this file does **not** exist, your system does not expose `platform_profile` and this tool will not work there.
+If either sysfs file is missing, this tool will not work on that machine.
 
 ### Software
 
-- `inotifywait` from `inotify-tools`.
+- `inotifywait` from `inotify-tools`
 
-Install per distro:
+Install it per distro:
 
-- **Arch / Manjaro / EndeavourOS**
+- Arch / Manjaro / EndeavourOS
 
-  ```
-  sudo pacman -S inotify-tools
-  ```
-- **Debian / Ubuntu / Pop!_OS / Mint**
-  ```
-  sudo apt install inotify-tools
-  ```
-- **Fedora**
-  ```
-  sudo dnf install inotify-tools
-  ```
-
-## Installation
-
-1. **Install dependencies**
-
-   Install `inotify-tools` as shown above for your distro.
-
-2. **Copy the script**
-
-   Place the script somewhere root-owned and executable, for example:
-
-   ```
-   sudo mkdir -p /usr/local/sbin
-   sudo cp legion-fnq-override.sh /usr/local/sbin/legion-fnq-override.sh
-   sudo chmod +x /usr/local/sbin/legion-fnq-override.sh
-   ```
-
-   `/var/lib/legion-fnq-state` will be created automatically by the script if needed.
-3. **Install the systemd service**
-
-   Create `/etc/systemd/system/legion-fnq-override.service`:
-
-   ```
-   [Unit]
-   Description=Override Lenovo Legion Fn+Q to 4-step platform_profile cycle
-   After=multi-user.target
-
-   [Service]
-   Type=simple
-   ExecStart=/usr/local/sbin/legion-fnq-override.sh
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-   Then reload and enable:
-
-   ```
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now legion-fnq-override.service
-   ```
-
-   Check status:
-
-   ```
-   systemctl status legion-fnq-override.service
-   ```
-
-   It should show `active (running)` with no errors.
-
----
-
-  ## Recommended power setup (to avoid conflicts)
-
-To let this script fully control Fn+Q behavior, it is strongly recommended to disable other daemons that write to `platform_profile` or constantly adjust platform policy.
-
-Common ones:
-
+```bash
+sudo pacman -S inotify-tools
 ```
-sudo systemctl disable --now auto-cpufreq.service   # if present
-sudo systemctl disable --now tlp.service            # if present
-sudo systemctl disable --now dynamic_power.service  # if present
-```
-- Note: dynamic-power-daemon can remain enabled if `acpi_platform_profile` is set to `disabled` in each profile in the system config `dynamic_power.yaml`. This prevents writes to `platform_profile` while still allowing CPU/EPP/ASPM tuning.
-  ## How to verify it’s working
 
-- **Watch the current profile:**
+- Debian / Ubuntu / Pop!_OS / Mint
+
+```bash
+sudo apt install inotify-tools
 ```
+
+- Fedora
+
+```bash
+sudo dnf install inotify-tools
+```
+
+## Installation (Suggested)
+
+The recommended path is the installer, because systemd runs the copy in `/usr/local/sbin`.
+Editing the repo file alone does not update the installed service.
+
+Run:
+
+```bash
+./install.sh
+```
+
+The installer prompts for `install` or `uninstall`, copies the current script into place, installs
+the tracked systemd unit, reloads systemd, and starts or removes the service.
+
+## Installation (Manual)
+
+Install dependencies
+
+Install `inotify-tools` as shown above for your distro.
+
+Copy the script
+
+Place the script somewhere root-owned and executable, for example:
+
+```bash
+sudo mkdir -p /usr/local/sbin
+sudo cp legion-fnq-override.sh /usr/local/sbin/legion-fnq-override.sh
+sudo chmod +x /usr/local/sbin/legion-fnq-override.sh
+```
+
+`/var/lib/legion-fnq-state` will be created automatically by the script if needed.
+
+Install the systemd service
+
+Create `/etc/systemd/system/legion-fnq-override.service`:
+
+```ini
+[Unit]
+Description=Override Lenovo Legion Fn+Q to 4-step platform_profile cycle
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/legion-fnq-override.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then reload and enable:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now legion-fnq-override.service
+```
+
+Check status with:
+
+```bash
+systemctl status legion-fnq-override.service
+```
+
+The service should stay `active (running)` with no write errors.
+
+If the service is already installed and the repo script changed, reinstall it. A running systemd
+service will keep using the old copy until `/usr/local/sbin/legion-fnq-override.sh` is replaced
+and the unit is restarted.
+
+## Recommended setup
+
+Avoid running other tools that constantly write to `platform_profile`, because they will race the
+override logic.
+
+Common examples:
+
+```bash
+sudo systemctl disable --now auto-cpufreq.service
+sudo systemctl disable --now tlp.service
+sudo systemctl disable --now dynamic_power.service
+```
+
+## How to verify it
+
+Watch the current profile:
+
+```bash
 watch -n0.2 cat /sys/firmware/acpi/platform_profile
 ```
-- **Press Fn+Q repeatedly.**
-You should see the sequence:
 
+Then press Fn+Q repeatedly.
+
+Expected sequence on newer kernels:
+
+```text
+low-power
+balanced
+performance
+max-power
+low-power
 ```
+
+Expected sequence on older kernels:
+
+```text
 low-power
 balanced
 balanced-performance
